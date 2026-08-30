@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Landslide Risk Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<style>
+  :root{
+    --bg:#0f1522;
+    --panel:#171f30;
+    --line:#2a3550;
+    --text:#e8ecf5;
+    --muted:#8a93a8;
+    --low:#3fb950;
+    --moderate:#d4a72c;
+    --high:#e8622c;
+    --veryhigh:#e5484d;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    font-family:-apple-system,'Segoe UI',Arial,sans-serif;
+    background:var(--bg);
+    color:var(--text);
+    padding:24px;
+  }
+  h1{font-size:22px; margin:0 0 4px;}
+  p.sub{color:var(--muted); margin:0 0 24px; font-size:14px;}
+  .panel{
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:10px;
+    padding:18px;
+    margin-bottom:20px;
+  }
+  table{width:100%; border-collapse:collapse; font-size:14px;}
+  th, td{padding:10px 8px; text-align:left; border-bottom:1px solid var(--line);}
+  th{color:var(--muted); font-weight:600; font-size:12px; text-transform:uppercase; letter-spacing:.03em;}
+  .badge{
+    display:inline-block;
+    padding:3px 10px;
+    border-radius:999px;
+    font-size:12px;
+    font-weight:700;
+  }
+  .Low{background:rgba(63,185,80,.15); color:var(--low);}
+  .Moderate{background:rgba(212,167,44,.15); color:var(--moderate);}
+  .High{background:rgba(232,98,44,.15); color:var(--high);}
+  .Very.High, .VeryHigh{background:rgba(229,72,77,.15); color:var(--veryhigh);}
+  #chartWrap{height:340px;}
+  .upload-row{display:flex; gap:10px; align-items:center; margin-top:10px;}
+  input[type=file]{color:var(--text); font-size:13px;}
+  button{
+    background:#2b6cb0;
+    color:#fff;
+    border:none;
+    padding:8px 16px;
+    border-radius:6px;
+    font-size:13px;
+    font-weight:600;
+    cursor:pointer;
+  }
+  button:hover{background:#245a94;}
+  #status{font-size:13px; color:var(--muted); margin-left:8px;}
+  .note{font-size:12px; color:var(--muted); margin-top:14px; line-height:1.5;}
+</style>
+</head>
+<body>
+
+<h1>🏔️ Landslide Risk Dashboard</h1>
+<p class="sub">Ranked by combined rainfall-excess and terrain-susceptibility risk score.</p>
+
+<div class="panel">
+  <div id="chartWrap"><canvas id="riskChart"></canvas></div>
+</div>
+
+<div class="panel">
+  <table id="riskTable">
+    <thead>
+      <tr>
+        <th>Region</th>
+        <th>Actual (mm)</th>
+        <th>Normal (mm)</th>
+        <th>Departure</th>
+        <th>Terrain</th>
+        <th>Risk Score</th>
+        <th>Risk Level</th>
+      </tr>
+    </thead>
+    <tbody id="riskBody"></tbody>
+  </table>
+</div>
+
+<div class="panel">
+  <strong>Update rainfall data</strong>
+  <div class="upload-row">
+    <input type="file" id="csvFile" accept=".csv">
+    <button onclick="uploadCsv()">Upload CSV</button>
+    <span id="status"></span>
+  </div>
+  <div class="note">
+    CSV columns required: <code>region,state,actual_mm,normal_mm</code>.
+    Uploading replaces the current dataset. The risk model recomputes automatically on refresh.
+  </div>
+</div>
+
+<script>
+const API_BASE = ''; // same origin
+
+async function loadRisk(){
+  const res = await fetch(API_BASE + '/api/risk');
+  const data = await res.json();
+  renderTable(data);
+  renderChart(data);
+}
+
+function levelClass(level){
+  return level.replace(' ', '');
+}
+
+function renderTable(data){
+  const body = document.getElementById('riskBody');
+  body.innerHTML = '';
+  data.forEach(row => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${row.region}</td>
+      <td>${row.actual_mm}</td>
+      <td>${row.normal_mm}</td>
+      <td>${row.departure_pct > 0 ? '+' : ''}${row.departure_pct}%</td>
+      <td>${row.terrain_score}</td>
+      <td>${row.risk_score}</td>
+      <td><span class="badge ${levelClass(row.risk_level)}">${row.risk_level}</span></td>
+    `;
+    body.appendChild(tr);
+  });
+}
+
+let chartInstance = null;
+function renderChart(data){
+  const ctx = document.getElementById('riskChart').getContext('2d');
+  const labels = data.map(r => r.region);
+  const scores = data.map(r => r.risk_score);
+  const colors = data.map(r => {
+    if(r.risk_score >= 70) return '#e5484d';
+    if(r.risk_score >= 50) return '#e8622c';
+    if(r.risk_score >= 30) return '#d4a72c';
+    return '#3fb950';
+  });
+
+  if(chartInstance) chartInstance.destroy();
+  chartInstance = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{ label: 'Risk Score', data: scores, backgroundColor: colors }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        y: { beginAtZero: true, max: 100, ticks: { color: '#8a93a8' }, grid: { color: '#2a3550' } },
+        x: { ticks: { color: '#8a93a8' }, grid: { display: false } }
+      },
+      plugins: { legend: { display: false } }
+    }
+  });
+}
+
+async function uploadCsv(){
+  const fileInput = document.getElementById('csvFile');
+  const status = document.getElementById('status');
+  if(!fileInput.files[0]){
+    status.textContent = 'Choose a CSV file first.';
+    return;
+  }
+  const formData = new FormData();
+  formData.append('file', fileInput.files[0]);
+  status.textContent = 'Uploading...';
+  try{
+    const res = await fetch(API_BASE + '/api/upload-csv', { method: 'POST', body: formData });
+    const result = await res.json();
+    if(res.ok){
+      status.textContent = `Saved ${result.rows_saved} rows.`;
+      loadRisk();
+    } else {
+      status.textContent = 'Error: ' + (result.detail || 'upload failed');
+    }
+  } catch(e){
+    status.textContent = 'Error: ' + e.message;
+  }
+}
+
+loadRisk();
+</script>
+
+</body>
+</html>
