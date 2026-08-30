@@ -93,9 +93,13 @@ async def api_upload_csv(file: UploadFile = File(...)):
 
 
 # Serve the frontend dashboard at "/"
-app.mount("/static", StaticFiles(directory="../frontend"), name="static")
+# app.mount("/static", StaticFiles(directory="../frontend"), name="static")
 
+
+# @app.get("/")
+# def serve_frontend():
+#     return FileResponse("../frontend/index.html")
 
 @app.get("/")
-def serve_frontend():
-    return FileResponse("../frontend/index.html")
+def root():
+    return {"message": "FastAPI is working on Vercel!"}
